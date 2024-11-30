@@ -1,6 +1,7 @@
-import mongoose from 'mongoose';
+import mongoose, { Schema } from 'mongoose';
+import { IGame } from '../types';
 
-const gameSchema = new mongoose.Schema({
+const gameSchema = new Schema<IGame>({
   targetPosition: {
     x: { type: Number, required: true },
     y: { type: Number, required: true },
@@ -19,4 +20,4 @@ const gameSchema = new mongoose.Schema({
   },
 });
 
-export default mongoose.model('Game', gameSchema);
+export default mongoose.model<IGame>('Game', gameSchema);

@@ -1,6 +1,7 @@
-import mongoose from 'mongoose';
+import mongoose, { Schema } from 'mongoose';
+import { IPlayer } from '../types';
 
-const playerSchema = new mongoose.Schema({
+const playerSchema = new Schema<IPlayer>({
   wallet: {
     type: String,
     required: true,
@@ -21,4 +22,4 @@ const playerSchema = new mongoose.Schema({
   },
 });
 
-export default mongoose.model('Player', playerSchema);
+export default mongoose.model<IPlayer>('Player', playerSchema);

@@ -7,7 +7,7 @@ const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/solana
 const MAX_RETRIES = 5;
 const RETRY_INTERVAL = 5000;
 
-const connectDB = async (retryCount = 0) => {
+const connectDB = async (retryCount = 0): Promise<typeof mongoose> => {
   try {
     const conn = await mongoose.connect(MONGODB_URI, {
       serverSelectionTimeoutMS: 5000,
@@ -16,8 +16,7 @@ const connectDB = async (retryCount = 0) => {
     
     console.log(`MongoDB Connected: ${conn.connection.host}`);
     
-    // Handle connection errors after initial connection
-    mongoose.connection.on('error', (err) => {
+    mongoose.connection.on('error', (err: Error) => {
       console.error('MongoDB connection error:', err);
       reconnect();
     });
@@ -29,7 +28,7 @@ const connectDB = async (retryCount = 0) => {
 
     return conn;
   } catch (error) {
-    console.error(`MongoDB connection error: ${error.message}`);
+    console.error(`MongoDB connection error: ${(error as Error).message}`);
     
     if (retryCount < MAX_RETRIES) {
       console.log(`Retrying connection... Attempt ${retryCount + 1}/${MAX_RETRIES}`);
@@ -42,7 +41,7 @@ const connectDB = async (retryCount = 0) => {
   }
 };
 
-const reconnect = () => {
+const reconnect = (): void => {
   console.log('Attempting to reconnect to MongoDB...');
   connectDB();
 };

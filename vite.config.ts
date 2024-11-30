@@ -1,34 +1,23 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
-import { resolve } from 'path';
+import { nodePolyfills } from 'vite-plugin-node-polyfills';
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [
+    react(),
+    nodePolyfills({
+      include: ['process', 'buffer', 'util', 'stream', 'zlib'],
+      globals: {
+        Buffer: true,
+        global: true,
+        process: true
+      }
+    })
+  ],
   resolve: {
     alias: {
-      process: 'process/browser',
-      stream: 'stream-browserify',
-      zlib: 'browserify-zlib',
-      util: 'util'
+      '@': '/src'
     }
-  },
-  define: {
-    'global': 'globalThis',
-    'process.env': process.env
-  },
-  optimizeDeps: {
-    esbuildOptions: {
-      define: {
-        global: 'globalThis'
-      }
-    },
-    include: [
-      '@project-serum/anchor',
-      '@solana/web3.js',
-      'buffer',
-      'process/browser',
-      'util'
-    ]
   },
   build: {
     rollupOptions: {
@@ -44,9 +33,6 @@ export default defineConfig({
           ]
         }
       }
-    },
-    commonjsOptions: {
-      transformMixedEsModules: true
     }
   }
 });

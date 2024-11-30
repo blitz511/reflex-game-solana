@@ -3,30 +3,49 @@ import { createServer } from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import connectDB from './config/db.js';
-import { createNewRound, handlePlayerClick, getGameState } from './services/gameService.js';
-import { stakeSOL } from './services/playerService.js';
+import connectDB from './config/db';
+import { createNewRound, handlePlayerClick, getGameState } from './services/gameService';
+import { stakeSOL } from './services/playerService';
 
 dotenv.config();
 
 const app = express();
 const httpServer = createServer(app);
+
+const allowedOrigins = [
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+  process.env.FRONTEND_URL,
+].filter(Boolean) as string[];
+
 const io = new Server(httpServer, {
   cors: {
-    origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+    origin: allowedOrigins,
     methods: ['GET', 'POST'],
+    credentials: true
   },
 });
 
-app.use(cors());
+app.use(cors({
+  origin: allowedOrigins,
+  credentials: true
+}));
 app.use(express.json());
 
-// Connect to MongoDB with proper error handling
+interface TargetClickData {
+  wallet: string;
+  timestamp: number;
+}
+
+interface StakeData {
+  wallet: string;
+  amount: number;
+}
+
 const initializeServer = async () => {
   try {
     await connectDB();
     
-    // Initialize game loop only after successful DB connection
     const startGameLoop = async () => {
       try {
         await createNewRound();
@@ -48,18 +67,16 @@ const initializeServer = async () => {
 
     await startGameLoop();
 
-    // Socket.IO event handlers
     io.on('connection', async (socket) => {
       try {
-        // Send initial game state
         const gameState = await getGameState();
         if (gameState) {
           socket.emit('gameState', gameState);
         }
 
-        socket.on('targetClick', async ({ wallet, timestamp }) => {
+        socket.on('targetClick', async (data: TargetClickData) => {
           try {
-            const updatedPlayer = await handlePlayerClick(wallet, timestamp);
+            const updatedPlayer = await handlePlayerClick(data.wallet, data.timestamp);
             if (updatedPlayer) {
               const newGameState = await getGameState();
               if (newGameState) {
@@ -72,11 +89,11 @@ const initializeServer = async () => {
           }
         });
 
-        socket.on('stake', async ({ wallet, amount }) => {
+        socket.on('stake', async (data: StakeData) => {
           try {
-            const player = await stakeSOL(wallet, amount);
+            const player = await stakeSOL(data.wallet, data.amount);
             if (player) {
-              socket.emit('playerStaked', wallet);
+              socket.emit('playerStaked', data.wallet);
               const newGameState = await getGameState();
               if (newGameState) {
                 io.emit('gameState', newGameState);

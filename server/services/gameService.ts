@@ -1,15 +1,16 @@
-import Game from '../models/Game.js';
-import Player from '../models/Player.js';
+import Game from '../models/Game';
+import Player from '../models/Player';
+import { Position, Winner } from '../types';
 
 const ROUND_DURATION = 30000; // 30 seconds
 const REWARD_PERCENTAGE = 0.9; // 90% of the pool goes to winners
 
-export const generateNewPosition = () => ({
+export const generateNewPosition = (): Position => ({
   x: Math.floor(Math.random() * 80 + 10),
   y: Math.floor(Math.random() * 80 + 10),
 });
 
-export const calculateRewards = async (game) => {
+export const calculateRewards = async (currentRound: number): Promise<Winner[]> => {
   try {
     const players = await Player.find({ 
       lastActive: { $gte: new Date(Date.now() - ROUND_DURATION) },
@@ -21,12 +22,11 @@ export const calculateRewards = async (game) => {
     const totalStaked = players.reduce((sum, p) => sum + p.stakedAmount, 0);
     const prizePool = totalStaked * REWARD_PERCENTAGE;
     
-    // Top 3 players get rewards
-    const rewardDistribution = [0.5, 0.3, 0.2]; // 50%, 30%, 20% of prize pool
+    const rewardDistribution = [0.5, 0.3, 0.2];
     const winners = players.slice(0, 3).map((player, index) => ({
       wallet: player.wallet,
       amount: prizePool * rewardDistribution[index],
-      round: game.currentRound,
+      round: currentRound,
     }));
 
     return winners;
@@ -36,12 +36,11 @@ export const calculateRewards = async (game) => {
   }
 };
 
-export const createNewRound = async () => {
+export const createNewRound = async (): Promise<Winner[]> => {
   try {
     const game = await Game.findOne();
     if (game) {
-      const winners = await calculateRewards(game);
-      game.winners = winners;
+      const winners = await calculateRewards(game.currentRound);
       game.targetPosition = generateNewPosition();
       game.roundEndTime = new Date(Date.now() + ROUND_DURATION);
       game.currentRound += 1;
@@ -51,7 +50,6 @@ export const createNewRound = async () => {
       await Game.create({
         targetPosition: generateNewPosition(),
         roundEndTime: new Date(Date.now() + ROUND_DURATION),
-        winners: [],
       });
       return [];
     }
@@ -61,7 +59,7 @@ export const createNewRound = async () => {
   }
 };
 
-export const handlePlayerClick = async (wallet, timestamp) => {
+export const handlePlayerClick = async (wallet: string, timestamp: number) => {
   try {
     const player = await Player.findOne({ wallet });
     if (!player || player.stakedAmount <= 0) return null;
@@ -90,18 +88,20 @@ export const getGameState = async () => {
       }),
     ]);
 
+    if (!game) return null;
+
     const totalStaked = players.reduce((sum, p) => sum + p.stakedAmount, 0);
 
     return {
-      targetPosition: game?.targetPosition || generateNewPosition(),
+      targetPosition: game.targetPosition,
       players: players.map(p => ({
         wallet: p.wallet,
         stakedAmount: p.stakedAmount,
         score: p.score,
       })),
-      isActive: game?.isActive || true,
-      currentRoundEndTime: game?.roundEndTime?.getTime() || Date.now() + ROUND_DURATION,
-      winners: game?.winners || [],
+      isActive: game.isActive,
+      currentRoundEndTime: game.roundEndTime.getTime(),
+      winners: [],
       prizePool: totalStaked * REWARD_PERCENTAGE,
     };
   } catch (error) {

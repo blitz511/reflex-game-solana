@@ -1,51 +1,88 @@
-import { useCallback, useState, useEffect, useRef } from 'react';
+import { useCallback, useState, useEffect } from 'react';
 import { useConnection, useWallet } from '@solana/wallet-adapter-react';
-import { LAMPORTS_PER_SOL, PublicKey } from '@solana/web3.js';
-import { io, Socket } from 'socket.io-client';
+import { LAMPORTS_PER_SOL } from '@solana/web3.js';
+import { toast } from 'react-hot-toast';
 import { GameState } from '../types';
 import { GAME_CONFIG } from '../config/constants';
-import { toast } from 'react-hot-toast';
 import { SolanaService } from '../services/solanaService';
+import { useSocket } from './useSocket';
 
-// ... (previous imports and initial state remain the same)
+const initialGameState: GameState = {
+  targetPosition: { x: 50, y: 50 },
+  players: [],
+  isActive: false,
+  currentRoundEndTime: Date.now(),
+  winners: [],
+  prizePool: 0
+};
 
 export const useGameState = () => {
   const { connection } = useConnection();
   const wallet = useWallet();
+  const socket = useSocket();
+  const [gameState, setGameState] = useState<GameState>(initialGameState);
   const [solanaService, setSolanaService] = useState<SolanaService | null>(null);
-  
-  // ... (previous state declarations remain the same)
 
   useEffect(() => {
     if (connection && wallet) {
-      const service = new SolanaService(connection, wallet);
-      setSolanaService(service);
+      setSolanaService(new SolanaService(connection, wallet));
     }
   }, [connection, wallet]);
 
+  useEffect(() => {
+    if (socket) {
+      socket.on('gameState', (newState: GameState) => {
+        setGameState(newState);
+      });
+    }
+  }, [socket]);
+
+  const isStaked = wallet.publicKey && gameState.players.some(
+    p => p.wallet === wallet.publicKey?.toBase58()
+  );
+
+  const handleTargetClick = useCallback(() => {
+    if (!wallet.publicKey || !isStaked) return;
+    
+    socket?.emit('targetClick', {
+      wallet: wallet.publicKey.toBase58(),
+      timestamp: Date.now()
+    });
+  }, [wallet.publicKey, isStaked, socket]);
+
   const stakeSOL = useCallback(async (amount: number) => {
-    if (!wallet.publicKey || !connection || !solanaService) {
+    if (!wallet.publicKey || !solanaService) {
       toast.error('Please connect your wallet first');
       return;
     }
 
     try {
-      toast.loading('Staking SOL...');
+      const toastId = toast.loading('Staking SOL...');
       await solanaService.stake(amount);
       
-      if (socket) {
-        socket.emit('stake', {
-          wallet: wallet.publicKey.toBase58(),
-          amount,
-        });
-      }
+      socket?.emit('stake', {
+        wallet: wallet.publicKey.toBase58(),
+        amount: amount * LAMPORTS_PER_SOL
+      });
       
-      toast.success('Successfully staked SOL!');
+      toast.success('Successfully staked SOL!', { id: toastId });
     } catch (error) {
       console.error('Error staking SOL:', error);
       toast.error('Failed to stake SOL');
     }
-  }, [wallet, connection, solanaService, socket]);
+  }, [wallet.publicKey, solanaService, socket]);
 
-  // ... (rest of the hook implementation remains the same)
+  const connectToGame = useCallback(() => {
+    if (!socket?.connected) {
+      socket?.connect();
+    }
+  }, [socket]);
+
+  return {
+    gameState,
+    isStaked,
+    handleTargetClick,
+    stakeSOL,
+    connectToGame
+  };
 };
