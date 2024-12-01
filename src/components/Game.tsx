@@ -49,12 +49,13 @@ const Game: React.FC = () => {
             </div>
 
             <div className="relative aspect-[16/9] bg-gray-900/50 backdrop-blur-md rounded-xl overflow-hidden">
-              {publicKey ? (
-                isStaked ? (
-                  <Target 
+            <Target 
                     position={gameState.targetPosition} 
                     onClick={handleTargetClick}
-                  />
+             />
+              {publicKey ? (
+                isStaked ? (
+                  <div></div>
                 ) : (
                   <div className="absolute inset-0 flex items-center justify-center flex-col gap-4">
                     <button
