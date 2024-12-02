@@ -1,11 +1,15 @@
-import { useCallback, useState, useEffect } from 'react';
+import { useCallback, useState, useEffect, useRef } from 'react';
 import { useConnection, useWallet } from '@solana/wallet-adapter-react';
-import { LAMPORTS_PER_SOL } from '@solana/web3.js';
 import { toast } from 'react-hot-toast';
 import { GameState, GamePhase } from '../types';
 import { GAME_CONFIG, GAME_PHASES } from '../config/constants';
-import { SolanaService } from '../services/solanaService';
 import { useSocket } from './useSocket';
+
+const PHASE_DURATIONS = {
+  [GAME_PHASES.STAKING]: 60, // 1 minute
+  [GAME_PHASES.GAMEPLAY]: 180, // 3 minutes
+  [GAME_PHASES.WINNER_DECLARATION]: 30, // 30 seconds
+};
 
 const initialGameState: GameState = {
   targetPosition: { x: 50, y: 50 },
@@ -21,16 +25,17 @@ export const useGameState = () => {
   const wallet = useWallet();
   const socket = useSocket();
   const [gameState, setGameState] = useState<GameState>(initialGameState);
-  const [solanaService, setSolanaService] = useState<SolanaService | null>(null);
   const [currentPhase, setCurrentPhase] = useState<GamePhase>(GAME_PHASES.STAKING);
-  const [phaseTimeLeft, setPhaseTimeLeft] = useState<number>(GAME_CONFIG.PHASES.STAKING);
-  const [statusMessage, setStatusMessage] = useState<string>('Staking phase in progress...');
+  const [phaseTimeLeft, setPhaseTimeLeft] = useState<number>(PHASE_DURATIONS[GAME_PHASES.STAKING]);
+  const phaseEndTimeRef = useRef<number>(Date.now() + PHASE_DURATIONS[GAME_PHASES.STAKING] * 1000);
 
-  useEffect(() => {
-    if (connection && wallet) {
-      setSolanaService(new SolanaService(connection, wallet));
-    }
-  }, [connection, wallet]);
+  const updatePhase = useCallback((newPhase: GamePhase, serverEndTime?: number) => {
+    setCurrentPhase(newPhase);
+    const duration = PHASE_DURATIONS[newPhase];
+    const endTime = serverEndTime || Date.now() + duration * 1000;
+    phaseEndTimeRef.current = endTime;
+    setPhaseTimeLeft(Math.ceil((endTime - Date.now()) / 1000));
+  }, []);
 
   useEffect(() => {
     if (socket) {
@@ -38,12 +43,28 @@ export const useGameState = () => {
         setGameState(newState);
       });
 
-      socket.on('phaseChange', ({ phase, timeLeft, message }) => {
-        setCurrentPhase(phase);
-        setPhaseTimeLeft(timeLeft);
-        setStatusMessage(message);
+      socket.on('phaseChange', ({ phase, endTime }) => {
+        updatePhase(phase, endTime);
       });
+
+      // Request initial phase synchronization
+      socket.emit('requestPhase');
     }
+  }, [socket, updatePhase]);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const now = Date.now();
+      const timeLeft = Math.ceil((phaseEndTimeRef.current - now) / 1000);
+      
+      if (timeLeft <= 0) {
+        socket?.emit('requestPhase');
+      } else {
+        setPhaseTimeLeft(timeLeft);
+      }
+    }, 1000);
+
+    return () => clearInterval(timer);
   }, [socket]);
 
   const isStaked = useCallback((): boolean => {
@@ -66,6 +87,19 @@ export const useGameState = () => {
     }
   }, [socket]);
 
+  const getStatusMessage = useCallback(() => {
+    switch (currentPhase) {
+      case GAME_PHASES.STAKING:
+        return 'Staking phase - Get ready for the next round!';
+      case GAME_PHASES.GAMEPLAY:
+        return 'Game in progress - Click the targets as fast as you can!';
+      case GAME_PHASES.WINNER_DECLARATION:
+        return 'Calculating winners...';
+      default:
+        return '';
+    }
+  }, [currentPhase]);
+
   return {
     gameState,
     isStaked: isStaked(),
@@ -73,6 +107,6 @@ export const useGameState = () => {
     connectToGame,
     currentPhase,
     phaseTimeLeft,
-    statusMessage
+    statusMessage: getStatusMessage()
   };
 };

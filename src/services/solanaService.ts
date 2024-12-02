@@ -2,11 +2,12 @@ import { Connection, PublicKey, SystemProgram, LAMPORTS_PER_SOL } from '@solana/
 import { Program, AnchorProvider, BN, Idl } from '@coral-xyz/anchor';
 import { WalletContextState } from '@solana/wallet-adapter-react';
 import { GAME_CONFIG } from '../config/constants';
+import { ProgramError, StakingProgram } from '../types/program';
 
 export class SolanaService {
   private connection: Connection;
   private wallet: WalletContextState;
-  private program: Program;
+  private program: StakingProgram;
 
   constructor(connection: Connection, wallet: WalletContextState) {
     this.connection = connection;
@@ -20,9 +21,8 @@ export class SolanaService {
 
     this.program = new Program(
       GAME_CONFIG.IDL,
-      new PublicKey(GAME_CONFIG.PROGRAM_ID),
       provider
-    );
+    ) as StakingProgram;
   }
 
   async stake(amount: number): Promise<void> {
@@ -64,11 +64,11 @@ export class SolanaService {
       await this.connection.confirmTransaction(signature, 'confirmed');
     } catch (error) {
       console.error('Stake error:', error);
-      throw error;
+      throw this.handleError(error);
     }
   }
 
-  async getPlayerState(): Promise<any> {
+  async getPlayerState() {
     if (!this.wallet.publicKey) throw new Error('Wallet not connected');
 
     try {
@@ -82,15 +82,14 @@ export class SolanaService {
 
       const playerAccount = await this.program.account.playerAccount.fetch(playerPda);
       return {
-        key: playerAccount.key,
-        amount: playerAccount.amount.toNumber() / LAMPORTS_PER_SOL
+        key: playerAccount.key.toString(),
+        amount: playerAccount.amount / LAMPORTS_PER_SOL
       };
     } catch (error) {
-      if (error.message.includes('Account does not exist')) {
+      if ((error as ProgramError).code === 3012) {
         return null;
       }
-      console.error('Get player state error:', error);
-      throw error;
+      throw this.handleError(error);
     }
   }
 
@@ -124,8 +123,15 @@ export class SolanaService {
       const signature = await this.wallet.sendTransaction(tx, this.connection);
       await this.connection.confirmTransaction(signature, 'confirmed');
     } catch (error) {
-      console.error('Close player account error:', error);
-      throw error;
+      throw this.handleError(error);
     }
+  }
+
+  private handleError(error: unknown): Error {
+    const programError = error as ProgramError;
+    if (programError.msg) {
+      return new Error(programError.msg);
+    }
+    return new Error('An unexpected error occurred');
   }
 }
