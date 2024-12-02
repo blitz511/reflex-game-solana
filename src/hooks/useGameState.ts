@@ -5,19 +5,16 @@ import { GameState, GamePhase } from '../types';
 import { GAME_CONFIG, GAME_PHASES } from '../config/constants';
 import { useSocket } from './useSocket';
 
-const PHASE_DURATIONS = {
-  [GAME_PHASES.STAKING]: 60, // 1 minute
-  [GAME_PHASES.GAMEPLAY]: 180, // 3 minutes
-  [GAME_PHASES.WINNER_DECLARATION]: 30, // 30 seconds
-};
-
 const initialGameState: GameState = {
   targetPosition: { x: 50, y: 50 },
   players: [],
   isActive: false,
   currentRoundEndTime: Date.now(),
   winners: [],
-  prizePool: 0
+  prizePool: 0,
+  serverTime: Date.now(),
+  currentPhase: GAME_PHASES.STAKING,
+  phaseEndTime: Date.now()
 };
 
 export const useGameState = () => {
@@ -26,46 +23,52 @@ export const useGameState = () => {
   const socket = useSocket();
   const [gameState, setGameState] = useState<GameState>(initialGameState);
   const [currentPhase, setCurrentPhase] = useState<GamePhase>(GAME_PHASES.STAKING);
-  const [phaseTimeLeft, setPhaseTimeLeft] = useState<number>(PHASE_DURATIONS[GAME_PHASES.STAKING]);
-  const phaseEndTimeRef = useRef<number>(Date.now() + PHASE_DURATIONS[GAME_PHASES.STAKING] * 1000);
-
-  const updatePhase = useCallback((newPhase: GamePhase, serverEndTime?: number) => {
-    setCurrentPhase(newPhase);
-    const duration = PHASE_DURATIONS[newPhase];
-    const endTime = serverEndTime || Date.now() + duration * 1000;
-    phaseEndTimeRef.current = endTime;
-    setPhaseTimeLeft(Math.ceil((endTime - Date.now()) / 1000));
-  }, []);
+  const [phaseTimeLeft, setPhaseTimeLeft] = useState<number>(0);
+  const [serverTimeOffset, setServerTimeOffset] = useState<number>(0);
 
   useEffect(() => {
     if (socket) {
       socket.on('gameState', (newState: GameState) => {
         setGameState(newState);
+        setCurrentPhase(newState.currentPhase);
+        
+        // Calculate server time offset
+        const clientTime = Date.now();
+        const offset = newState.serverTime - clientTime;
+        setServerTimeOffset(offset);
       });
 
-      socket.on('phaseChange', ({ phase, endTime }) => {
-        updatePhase(phase, endTime);
+      socket.on('error', (error: { message: string }) => {
+        toast.error(error.message);
       });
 
-      // Request initial phase synchronization
-      socket.emit('requestPhase');
+      // Request initial state
+      socket.emit('requestGameState');
     }
-  }, [socket, updatePhase]);
 
+    return () => {
+      if (socket) {
+        socket.off('gameState');
+        socket.off('error');
+      }
+    };
+  }, [socket]);
+
+  // Update time left based on server time
   useEffect(() => {
     const timer = setInterval(() => {
-      const now = Date.now();
-      const timeLeft = Math.ceil((phaseEndTimeRef.current - now) / 1000);
-      
-      if (timeLeft <= 0) {
-        socket?.emit('requestPhase');
-      } else {
-        setPhaseTimeLeft(timeLeft);
+      const currentServerTime = Date.now() + serverTimeOffset;
+      const timeLeft = Math.max(0, Math.ceil((gameState.phaseEndTime - currentServerTime) / 1000));
+      setPhaseTimeLeft(timeLeft);
+
+      // Auto-request new state when phase ends
+      if (timeLeft === 0) {
+        socket?.emit('requestGameState');
       }
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [socket]);
+  }, [gameState.phaseEndTime, serverTimeOffset, socket]);
 
   const isStaked = useCallback((): boolean => {
     if (!wallet.publicKey) return false;
@@ -73,13 +76,15 @@ export const useGameState = () => {
   }, [wallet.publicKey, gameState.players]);
 
   const handleTargetClick = useCallback(() => {
-    if (!wallet.publicKey || !isStaked() || currentPhase !== GAME_PHASES.GAMEPLAY) return;
+    if (!wallet.publicKey || !isStaked() || currentPhase !== GAME_PHASES.GAMEPLAY) {
+      return;
+    }
     
     socket?.emit('targetClick', {
       wallet: wallet.publicKey.toBase58(),
-      timestamp: Date.now()
+      timestamp: Date.now() + serverTimeOffset
     });
-  }, [wallet.publicKey, isStaked, currentPhase, socket]);
+  }, [wallet.publicKey, isStaked, currentPhase, serverTimeOffset, socket]);
 
   const connectToGame = useCallback(() => {
     if (!socket?.connected) {

@@ -1,8 +1,14 @@
 import Game from '../models/Game';
 import Player from '../models/Player';
-import { Position, Winner } from '../types';
+import { Position, Winner, GamePhase } from '../types';
+import { GAME_PHASES } from '../config/gameConfig';
 
-const ROUND_DURATION = 30000; // 30 seconds
+const PHASE_DURATIONS = {
+  [GAME_PHASES.STAKING]: 30000,    // 30 seconds
+  [GAME_PHASES.GAMEPLAY]: 30000,    // 30 seconds
+  [GAME_PHASES.WINNER_DECLARATION]: 10000, // 10 seconds
+};
+
 const REWARD_PERCENTAGE = 0.9; // 90% of the pool goes to winners
 
 export const generateNewPosition = (): Position => ({
@@ -13,7 +19,6 @@ export const generateNewPosition = (): Position => ({
 export const calculateRewards = async (currentRound: number): Promise<Winner[]> => {
   try {
     const players = await Player.find({ 
-      lastActive: { $gte: new Date(Date.now() - ROUND_DURATION) },
       score: { $gt: 0 }
     }).sort({ score: -1 });
 
@@ -36,36 +41,58 @@ export const calculateRewards = async (currentRound: number): Promise<Winner[]> 
   }
 };
 
-export const createNewRound = async (): Promise<Winner[]> => {
-  try {
-    const game = await Game.findOne();
-    if (game) {
-      const winners = await calculateRewards(game.currentRound);
-      game.targetPosition = generateNewPosition();
-      game.roundEndTime = new Date(Date.now() + ROUND_DURATION);
-      game.currentRound += 1;
-      await game.save();
-      return winners;
-    } else {
-      await Game.create({
-        targetPosition: generateNewPosition(),
-        roundEndTime: new Date(Date.now() + ROUND_DURATION),
-      });
-      return [];
-    }
-  } catch (error) {
-    console.error('Error creating new round:', error);
-    return [];
+export const getCurrentPhase = async (): Promise<{ phase: GamePhase; endTime: number }> => {
+  const game = await Game.findOne();
+  if (!game) {
+    return {
+      phase: GAME_PHASES.STAKING,
+      endTime: Date.now() + PHASE_DURATIONS[GAME_PHASES.STAKING]
+    };
+  }
+
+  const now = Date.now();
+  const phaseStartTime = game.phaseStartTime.getTime();
+  const currentPhaseDuration = PHASE_DURATIONS[game.currentPhase];
+  const timeElapsed = now - phaseStartTime;
+
+  if (timeElapsed >= currentPhaseDuration) {
+    // Time to move to next phase
+    const nextPhase = getNextPhase(game.currentPhase);
+    const newEndTime = now + PHASE_DURATIONS[nextPhase];
+    
+    game.currentPhase = nextPhase;
+    game.phaseStartTime = new Date();
+    await game.save();
+
+    return { phase: nextPhase, endTime: newEndTime };
+  }
+
+  return {
+    phase: game.currentPhase,
+    endTime: phaseStartTime + currentPhaseDuration
+  };
+};
+
+const getNextPhase = (currentPhase: GamePhase): GamePhase => {
+  switch (currentPhase) {
+    case GAME_PHASES.STAKING:
+      return GAME_PHASES.GAMEPLAY;
+    case GAME_PHASES.GAMEPLAY:
+      return GAME_PHASES.WINNER_DECLARATION;
+    case GAME_PHASES.WINNER_DECLARATION:
+      return GAME_PHASES.STAKING;
+    default:
+      return GAME_PHASES.STAKING;
   }
 };
 
 export const handlePlayerClick = async (wallet: string, timestamp: number) => {
   try {
+    const { phase } = await getCurrentPhase();
+    if (phase !== GAME_PHASES.GAMEPLAY) return null;
+
     const player = await Player.findOne({ wallet });
     if (!player || player.stakedAmount <= 0) return null;
-
-    const game = await Game.findOne();
-    if (!game || !game.isActive) return null;
 
     player.score += 1;
     player.lastActive = new Date();
@@ -82,11 +109,10 @@ export const getGameState = async () => {
   try {
     const [game, players] = await Promise.all([
       Game.findOne(),
-      Player.find({ 
-        lastActive: { $gte: new Date(Date.now() - ROUND_DURATION) },
-        stakedAmount: { $gt: 0 }
-      }),
+      Player.find({ stakedAmount: { $gt: 0 } }),
     ]);
+
+    const { phase, endTime } = await getCurrentPhase();
 
     if (!game) return null;
 
@@ -99,10 +125,13 @@ export const getGameState = async () => {
         stakedAmount: p.stakedAmount,
         score: p.score,
       })),
-      isActive: game.isActive,
+      isActive: true,
       currentRoundEndTime: game.roundEndTime.getTime(),
       winners: [],
       prizePool: totalStaked * REWARD_PERCENTAGE,
+      serverTime: Date.now(),
+      currentPhase: phase,
+      phaseEndTime: endTime
     };
   } catch (error) {
     console.error('Error getting game state:', error);

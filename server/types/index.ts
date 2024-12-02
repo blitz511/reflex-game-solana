@@ -1,4 +1,7 @@
 import { Document } from 'mongoose';
+import { GAME_PHASES } from '../config/gameConfig';
+
+export type GamePhase = typeof GAME_PHASES[keyof typeof GAME_PHASES];
 
 export interface Position {
   x: number;
@@ -10,6 +13,8 @@ export interface IGame extends Document {
   isActive: boolean;
   roundEndTime: Date;
   currentRound: number;
+  currentPhase: GamePhase;
+  phaseStartTime: Date;
 }
 
 export interface IPlayer extends Document {
@@ -36,4 +41,7 @@ export interface GameState {
   currentRoundEndTime: number;
   winners: Winner[];
   prizePool: number;
+  serverTime: number;
+  currentPhase: GamePhase;
+  phaseEndTime: number;
 }
