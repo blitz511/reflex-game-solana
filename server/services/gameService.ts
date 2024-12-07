@@ -1,44 +1,13 @@
+import { Position, GamePhase } from '../types';
 import Game from '../models/Game';
 import Player from '../models/Player';
-import { Position, Winner, GamePhase } from '../types';
 import { GAME_PHASES } from '../config/gameConfig';
+import { calculateRewardDistribution } from '../utils/gameUtils';
 
 const PHASE_DURATIONS = {
   [GAME_PHASES.STAKING]: 30000,    // 30 seconds
   [GAME_PHASES.GAMEPLAY]: 30000,    // 30 seconds
   [GAME_PHASES.WINNER_DECLARATION]: 10000, // 10 seconds
-};
-
-const REWARD_PERCENTAGE = 0.9; // 90% of the pool goes to winners
-
-export const generateNewPosition = (): Position => ({
-  x: Math.floor(Math.random() * 80 + 10),
-  y: Math.floor(Math.random() * 80 + 10),
-});
-
-export const calculateRewards = async (currentRound: number): Promise<Winner[]> => {
-  try {
-    const players = await Player.find({ 
-      score: { $gt: 0 }
-    }).sort({ score: -1 });
-
-    if (players.length === 0) return [];
-
-    const totalStaked = players.reduce((sum, p) => sum + p.stakedAmount, 0);
-    const prizePool = totalStaked * REWARD_PERCENTAGE;
-    
-    const rewardDistribution = [0.5, 0.3, 0.2];
-    const winners = players.slice(0, 3).map((player, index) => ({
-      wallet: player.wallet,
-      amount: prizePool * rewardDistribution[index],
-      round: currentRound,
-    }));
-
-    return winners;
-  } catch (error) {
-    console.error('Error calculating rewards:', error);
-    return [];
-  }
 };
 
 export const getCurrentPhase = async (): Promise<{ phase: GamePhase; endTime: number }> => {
@@ -56,7 +25,6 @@ export const getCurrentPhase = async (): Promise<{ phase: GamePhase; endTime: nu
   const timeElapsed = now - phaseStartTime;
 
   if (timeElapsed >= currentPhaseDuration) {
-    // Time to move to next phase
     const nextPhase = getNextPhase(game.currentPhase);
     const newEndTime = now + PHASE_DURATIONS[nextPhase];
     
@@ -98,7 +66,12 @@ export const handlePlayerClick = async (wallet: string, timestamp: number) => {
     player.lastActive = new Date();
     await player.save();
 
-    return player;
+    return {
+      wallet: player.wallet,
+      stakedAmount: player.stakedAmount,
+      score: player.score,
+      lastActive: player.lastActive
+    };
   } catch (error) {
     console.error('Error handling player click:', error);
     return null;
@@ -124,11 +97,12 @@ export const getGameState = async () => {
         wallet: p.wallet,
         stakedAmount: p.stakedAmount,
         score: p.score,
+        lastActive: p.lastActive
       })),
       isActive: true,
       currentRoundEndTime: game.roundEndTime.getTime(),
       winners: [],
-      prizePool: totalStaked * REWARD_PERCENTAGE,
+      prizePool: totalStaked * 0.9, // 90% of total stakes
       serverTime: Date.now(),
       currentPhase: phase,
       phaseEndTime: endTime
