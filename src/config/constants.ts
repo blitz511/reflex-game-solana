@@ -14,7 +14,7 @@ export const GAME_CONFIG = {
     GAMEPLAY: 30000,     // 30 seconds
     WINNER: 10000        // 10 seconds
   },
-  STAKE_AMOUNT: 0.1,
+  STAKE_AMOUNT: 0.01,
   PROGRAM_ID: 'B1NT1eXqBEnidk3kQ874u1h7VvyqBxTc9qfspgh1ef8A',
   IDL: gameIdl as Idl,
   REWARD_PERCENTAGE: 0.9,

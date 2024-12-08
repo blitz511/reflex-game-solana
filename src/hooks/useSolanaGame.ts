@@ -27,6 +27,7 @@ export const useSolanaGame = () => {
     setIsLoading(true);
     try {
       const toastId = toast.loading('Processing stake transaction...');
+      console.log("GAME_CONFIG.STAKE_AMOUNT ",GAME_CONFIG.STAKE_AMOUNT);
       const signature = await solanaService.stake(GAME_CONFIG.STAKE_AMOUNT);
       
       // Notify backend about the stake

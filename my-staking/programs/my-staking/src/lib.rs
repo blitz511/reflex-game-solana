@@ -24,46 +24,57 @@ pub mod staking_program {
         Ok(())
     }
 
-    pub fn stake(ctx: Context<Stake>, amount: u64) -> Result<()> {
-        let state = &mut ctx.accounts.state;
-        let player_account = &mut ctx.accounts.player_account;
+pub fn stake(ctx: Context<Stake>, amount: u64) -> Result<()> {
+    let state = &mut ctx.accounts.state;
+    let player_account = &mut ctx.accounts.player_account;
 
-        // Calculate the required rent
-        let required_lamports = Rent::get()?.minimum_balance(PlayerAccount::MAX_SIZE);
+    // Calculate the required rent
+    let required_lamports = Rent::get()?.minimum_balance(PlayerAccount::MAX_SIZE);
 
+    // Check if the player account has already been initialized
+    if player_account.key == Pubkey::default() {
         // If this is a new player, ensure they're paying enough to cover rent
-        if player_account.key == Pubkey::default() {
-            require!(
-                amount >= required_lamports,
-                CustomError::InsufficientStakeForRent
-            );
-
-            player_account.key = ctx.accounts.authority.key();
-            state.player_count += 1;
-        }
-
-        // Transfer SOL from the user to the vault
-        let ix = system_instruction::transfer(
-            &ctx.accounts.authority.key(),
-            &ctx.accounts.vault.key(),
-            amount,
+        require!(
+            amount >= required_lamports,
+            CustomError::InsufficientStakeForRent
         );
 
-        invoke_signed(
-            &ix,
-            &[
-                ctx.accounts.authority.to_account_info(),
-                ctx.accounts.vault.to_account_info(),
-                ctx.accounts.system_program.to_account_info(),
-            ],
-            &[&[b"vault", &[ctx.bumps.vault]]],
-        )?;
-
-        state.total_staked += amount;
-        player_account.amount += amount;
-
-        Ok(())
+        // Initialize the player account
+        player_account.key = ctx.accounts.authority.key();
+        player_account.amount = 0; // Initialize amount to zero
+        state.player_count += 1;
+    } else {
+        // If the player account is already initialized, ensure it belongs to the current authority
+        require!(
+            player_account.key == ctx.accounts.authority.key(),
+            CustomError::Unauthorized
+        );
     }
+
+    // Transfer SOL from the user to the vault
+    let ix = system_instruction::transfer(
+        &ctx.accounts.authority.key(),
+        &ctx.accounts.vault.key(),
+        amount,
+    );
+
+    invoke_signed(
+        &ix,
+        &[
+            ctx.accounts.authority.to_account_info(),
+            ctx.accounts.vault.to_account_info(),
+            ctx.accounts.system_program.to_account_info(),
+        ],
+        &[&[b"vault", &[ctx.bumps.vault]]],
+    )?;
+
+    // Update total staked and player's amount
+    state.total_staked += amount;
+    player_account.amount += amount;
+
+    Ok(())
+}
+
 
     pub fn reward(ctx: Context<Reward>, winner: Pubkey) -> Result<()> {
         let state = &mut ctx.accounts.state;
