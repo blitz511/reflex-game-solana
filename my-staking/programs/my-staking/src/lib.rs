@@ -24,57 +24,56 @@ pub mod staking_program {
         Ok(())
     }
 
-pub fn stake(ctx: Context<Stake>, amount: u64) -> Result<()> {
-    let state = &mut ctx.accounts.state;
-    let player_account = &mut ctx.accounts.player_account;
+    pub fn stake(ctx: Context<Stake>, amount: u64) -> Result<()> {
+        let state = &mut ctx.accounts.state;
+        let player_account = &mut ctx.accounts.player_account;
 
-    // Calculate the required rent
-    let required_lamports = Rent::get()?.minimum_balance(PlayerAccount::MAX_SIZE);
+        // Calculate the required rent
+        let required_lamports = Rent::get()?.minimum_balance(PlayerAccount::MAX_SIZE);
 
-    // Check if the player account has already been initialized
-    if player_account.key == Pubkey::default() {
-        // If this is a new player, ensure they're paying enough to cover rent
-        require!(
-            amount >= required_lamports,
-            CustomError::InsufficientStakeForRent
+        // Check if the player account is new or existing
+        if player_account.key == Pubkey::default() {
+            // If this is a new player, ensure they're paying enough to cover rent
+            require!(
+                amount >= required_lamports,
+                CustomError::InsufficientStakeForRent
+            );
+
+            // Initialize the player account
+            player_account.key = ctx.accounts.authority.key();
+            player_account.amount = 0; // Initialize amount to zero
+            state.player_count += 1;
+        } else {
+            // If the player account is already initialized, ensure it belongs to the current authority
+            require!(
+                player_account.key == ctx.accounts.authority.key(),
+                CustomError::Unauthorized
+            );
+        }
+
+        // Transfer SOL from the user to the vault
+        let ix = system_instruction::transfer(
+            &ctx.accounts.authority.key(),
+            &ctx.accounts.vault.key(),
+            amount,
         );
 
-        // Initialize the player account
-        player_account.key = ctx.accounts.authority.key();
-        player_account.amount = 0; // Initialize amount to zero
-        state.player_count += 1;
-    } else {
-        // If the player account is already initialized, ensure it belongs to the current authority
-        require!(
-            player_account.key == ctx.accounts.authority.key(),
-            CustomError::Unauthorized
-        );
+        invoke_signed(
+            &ix,
+            &[
+                ctx.accounts.authority.to_account_info(),
+                ctx.accounts.vault.to_account_info(),
+                ctx.accounts.system_program.to_account_info(),
+            ],
+            &[&[b"vault", &[ctx.bumps.vault]]],
+        )?;
+
+        // Update total staked and player's amount
+        state.total_staked += amount;
+        player_account.amount += amount;
+
+        Ok(())
     }
-
-    // Transfer SOL from the user to the vault
-    let ix = system_instruction::transfer(
-        &ctx.accounts.authority.key(),
-        &ctx.accounts.vault.key(),
-        amount,
-    );
-
-    invoke_signed(
-        &ix,
-        &[
-            ctx.accounts.authority.to_account_info(),
-            ctx.accounts.vault.to_account_info(),
-            ctx.accounts.system_program.to_account_info(),
-        ],
-        &[&[b"vault", &[ctx.bumps.vault]]],
-    )?;
-
-    // Update total staked and player's amount
-    state.total_staked += amount;
-    player_account.amount += amount;
-
-    Ok(())
-}
-
 
     pub fn reward(ctx: Context<Reward>, winner: Pubkey) -> Result<()> {
         let state = &mut ctx.accounts.state;
@@ -120,7 +119,6 @@ pub fn stake(ctx: Context<Stake>, amount: u64) -> Result<()> {
         )?;
 
         state.total_staked = 0;
-        // Note: We're not resetting player_count here as player accounts still exist
 
         Ok(())
     }
@@ -134,7 +132,6 @@ pub fn stake(ctx: Context<Stake>, amount: u64) -> Result<()> {
         );
 
         state.total_staked = 0;
-        // Note: We're not resetting player_count here as player accounts still exist
 
         Ok(())
     }
@@ -183,7 +180,7 @@ pub struct Stake<'info> {
     pub vault: SystemAccount<'info>,
 
     #[account(
-        init,
+        init_if_needed,
         payer = authority,
         space = 8 + PlayerAccount::MAX_SIZE,
         seeds = [b"player", authority.key().as_ref()],
@@ -299,4 +296,3 @@ pub enum CustomError {
     #[msg("Insufficient stake amount to cover rent for new player account.")]
     InsufficientStakeForRent,
 }
-
