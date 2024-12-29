@@ -6,11 +6,11 @@ import dotenv from 'dotenv';
 import { errorHandler } from './middleware/errorHandler';
 import connectDB from './config/db';
 import { handlePlayerClick, getGameState } from './services/gameService';
-import { createNewRound } from './services/roundService';
 import { stakeSOL } from './services/playerService';
+import { createNewRound } from './services/roundService';
 import { SERVER_CONFIG } from './config/constants';
 import { isValidSolanaAddress, isValidStakeAmount } from './utils/validation';
-import { GameError } from './utils/errors';
+import { GameError, StakeError } from './utils/errors';
 
 dotenv.config();
 
@@ -45,6 +45,7 @@ interface TargetClickData {
 interface StakeData {
   wallet: string;
   amount: number;
+  signature: string;
 }
 
 const initializeServer = async () => {
@@ -94,23 +95,25 @@ const initializeServer = async () => {
             }
           } catch (error) {
             console.error('Error handling target click:', error);
-            socket.emit('error', { message: 'Failed to process click' });
+            socket.emit('error', { 
+              message: error instanceof GameError ? error.message : 'Failed to process click'
+            });
           }
         });
 
         socket.on('stake', async (data: StakeData) => {
           try {
             if (!isValidSolanaAddress(data.wallet)) {
-              throw new GameError('Invalid wallet address');
+              throw new StakeError('Invalid wallet address');
             }
 
             if (!isValidStakeAmount(data.amount)) {
-              throw new GameError('Invalid stake amount');
+              throw new StakeError('Invalid stake amount');
             }
 
             const player = await stakeSOL(data.wallet, data.amount);
             if (player) {
-              socket.emit('playerStaked', data.wallet);
+              socket.emit('playerStaked', { wallet: data.wallet, signature: data.signature });
               const newGameState = await getGameState();
               if (newGameState) {
                 io.emit('gameState', newGameState);
@@ -118,7 +121,9 @@ const initializeServer = async () => {
             }
           } catch (error) {
             console.error('Error handling stake:', error);
-            socket.emit('error', { message: 'Failed to process stake' });
+            socket.emit('error', { 
+              message: error instanceof StakeError ? error.message : 'Failed to process stake'
+            });
           }
         });
       } catch (error) {

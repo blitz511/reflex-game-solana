@@ -77,21 +77,28 @@ export class SolanaService {
     return signatures;
   }
 
-  async verifyStake(wallet: string, amount: number): Promise<boolean> {
-    try {
-      const walletPubkey = new PublicKey(wallet);
-      const [playerPda] = PublicKey.findProgramAddressSync(
-        [Buffer.from('player'), walletPubkey.toBuffer()],
-        this.program.programId
-      );
+async verifyStake(wallet: string, amount: number): Promise<boolean> {
+  try {
+    const walletPubkey = new PublicKey(wallet);
+    const [playerPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from('player'), walletPubkey.toBuffer()],
+      this.program.programId
+    );
 
-      const playerAccount = await this.program.account.playerAccount.fetch(playerPda);
-      return playerAccount.amount.toNumber() / LAMPORTS_PER_SOL >= amount;
-    } catch (error) {
-      console.error('Error verifying stake:', error);
-      return false;
-    }
+    // Define the type for playerAccount
+    type PlayerAccount = {
+      amount: anchor.BN;
+      // ... other fields as defined in your IDL
+    };
+
+    // Fetch and cast the account
+    const playerAccount = await this.program.account.playerAccount.fetch(playerPda) as PlayerAccount;
+    return playerAccount.amount.toNumber() / LAMPORTS_PER_SOL >= amount;
+  } catch (error) {
+    console.error('Error verifying stake:', error);
+    return false;
   }
+}
 
   async getTotalStaked(): Promise<number> {
     try {
